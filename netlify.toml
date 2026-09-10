@@ -3,12 +3,12 @@
   functions = "netlify/functions"
   publish = "build"
 
-[[redirects]]
+[redirects]
   from = "/*"
   to = "/index.html"
   status = 200
 
-[[headers]]
+[headers]
   for = "/*"
   [headers.values]
     X-Content-Type-Options = "nosniff"
@@ -19,17 +19,17 @@
 [functions]
   node_bundler = "esbuild"
 
-[[functions]]
+[functions]
   name = "parseAd"
   [functions.environment]
     TIMEOUT_MS = "30000"
 
-[[functions]]
+[functions]
   name = "updateSnapshots"
   [functions.environment]
     TIMEOUT_MS = "120000"
 
-[[functions]]
+[functions]
   name = "analytics"
   [functions.environment]
     TIMEOUT_MS = "60000"
