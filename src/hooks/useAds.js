@@ -10,12 +10,22 @@ export function useAds(userId) {
     if (!userId) return;
     try {
       setLoading(true);
+      // Traz num único request: dados do anúncio + histórico de snapshots +
+      // fotos + serviços + preços. Isso é o que alimenta tanto a tabela
+      // quanto a tela de detalhes/histórico de cada anúncio.
       const { data, error: err } = await supabase
         .from('ads')
-        .select('*, snapshots:ad_snapshots(visitors, data_snapshot)')
+        .select(`
+          *,
+          snapshots:ad_snapshots(visitors, data_snapshot),
+          fotos:ad_photos(url_foto, ordem),
+          servicos:ad_services(nome_servico, incluido, preco_extra),
+          precos:ad_rates(duracao, preco_incall, preco_outcall)
+        `)
         .eq('user_id', userId)
         .order('data_ultima_atualizacao', { ascending: false })
-        .order('data_snapshot', { foreignTable: 'ad_snapshots', ascending: true });
+        .order('data_snapshot', { foreignTable: 'ad_snapshots', ascending: true })
+        .order('ordem', { foreignTable: 'ad_photos', ascending: true });
 
       if (err) throw err;
       setAds(data || []);

@@ -79,15 +79,23 @@ class VivastreetParser {
   }
 
   extractLocalizacao($) {
-    // .clad__spec contém a localização (City)
-    return $('p.clad__spec').first().text().trim();
+    // Prioridade 1: campo "Location" da tabela de especificações
+    // (formato completo, ex: "Walthamstow - East London")
+    const daTabela = this.extractFromSpecsTable($, 'Location');
+    if (daTabela) return daTabela;
+
+    // Prioridade 2 (fallback): badge no topo do anúncio (ex: "Walthamstow")
+    // Nota: no HTML real este elemento é <div class="clad__spec">, não <p>
+    const badge = $('div.clad__spec, p.clad__spec').first().text().trim();
+    return badge;
   }
 
   extractRegiao($) {
     const localizacao = this.extractLocalizacao($);
-    // Tenta extrair da localização (geralmente "City - Region")
-    const match = localizacao.match(/([^-]+)$/);
-    return match ? match[1].trim() : localizacao;
+    if (!localizacao) return '';
+    // Formato "Cidade - Região" -> pega a parte depois do último hífen
+    const partes = localizacao.split('-').map(p => p.trim()).filter(Boolean);
+    return partes.length > 1 ? partes[partes.length - 1] : localizacao;
   }
 
   extractTipoAnuncio($) {
@@ -119,15 +127,35 @@ class VivastreetParser {
   }
 
   extractDataPublicacao($) {
+    // Prioridade 1: dado estruturado JSON-LD da própria página (mais confiável)
+    let datePublished = null;
+    $('script[type="application/ld+json"]').each((i, el) => {
+      if (datePublished) return;
+      try {
+        const json = JSON.parse($(el).contents().text());
+        const nodes = json['@graph'] || [json];
+        nodes.forEach(node => {
+          if (node && node.datePublished) datePublished = node.datePublished;
+        });
+      } catch (e) {
+        // ignora JSON-LD malformado
+      }
+    });
+    if (datePublished) {
+      const parsed = new Date(datePublished);
+      return isNaN(parsed) ? null : parsed.toISOString();
+    }
+
+    // Prioridade 2 (fallback): campo textual, caso o template mude
     const text = $('li[data-automation="liCreateDate"]').text();
-    // "Posted on 05 Sep, 2026"
     return text ? this.parseDate(text) : null;
   }
 
   extractMembroDe($) {
     const text = $('li[data-automation="liMemberSinceDate"]').text();
-    // "Member since 01 Jan, 2024"
-    return text ? this.parseDate(text) : null;
+    if (!text) return null;
+    // Formato real do site: "Member since 18/02/2020" (dd/mm/yyyy)
+    return this.parseDateDMY(text) || this.parseDate(text);
   }
 
   extractVisitors($) {
@@ -166,47 +194,52 @@ class VivastreetParser {
 
   extractServicos($) {
     const servicos = [];
-    
-    // Tabela de serviços (service-true / service-false)
-    $('ul li').each((i, li) => {
+
+    // IMPORTANTE: escopo restrito à tabela de serviços (data-automation="tblServices").
+    // Antes buscava "ul li" na página inteira e capturava menu, breadcrumbs,
+    // tags populares, banner de cookies, etc. como se fossem serviços.
+    $('table[data-automation="tblServices"] li').each((i, li) => {
       const $li = $(li);
-      const texto = $li.text().trim();
-      
-      // Determina se está marcado ou não
-      const incluido = !$li.attr('class')?.includes('service-false');
-      
-      // Tenta extrair preço extra se existir
-      const preco = $li.find('.price').text();
-      
-      if (texto) {
+      const automation = ($li.attr('data-automation') || '').toLowerCase();
+      const classe = $li.attr('class') || '';
+
+      // Serviço incluído: class="service-true" (ou termina em "true" no automation)
+      const incluido = classe.includes('service-true') || automation.endsWith('true');
+
+      // O preço extra vem dentro de um <span> filho (ex: "£30 extra") — removemos
+      // esse span antes de ler o texto para não misturar nome + preço
+      const $clone = $li.clone();
+      const precoTexto = $clone.find('span').text().trim();
+      $clone.find('span').remove();
+      const nome = $clone.text().trim();
+
+      if (nome) {
         servicos.push({
-          nome: texto.split('£')[0].trim(),
+          nome: nome,
           incluido: incluido,
-          preco_extra: preco ? this.parsePrice(preco) : null
+          preco_extra: precoTexto ? this.parsePrice(precoTexto) : null
         });
       }
     });
-    
+
     return servicos;
   }
 
   extractPrecos($) {
     const precos = [];
-    
-    // Tabela de preços (rates)
-    // Formato típico: linha = duração, colunas = incall/outcall
-    
-    const linhas = $('table').find('tr');
-    
-    linhas.each((i, tr) => {
+
+    // IMPORTANTE: escopo restrito à tabela de preços (data-automation="tblRates").
+    // Antes buscava "table tr" na página inteira, pegando linhas de outras
+    // tabelas (anúncios similares, cookies, etc.) por engano.
+    $('table[data-automation="tblRates"] tr').each((i, tr) => {
       const $tr = $(tr);
-      const cells = $tr.find('td');
-      
-      if (cells.length >= 3) {
-        const duracao = $(cells[0]).text().trim();
-        const incall = $(cells[1]).text().trim();
-        const outcall = $(cells[2]).text().trim();
-        
+      const $tds = $tr.find('td');
+
+      if ($tds.length >= 3) {
+        const duracao = $($tds[0]).text().trim();
+        const incall = $($tds[1]).text().trim();
+        const outcall = $($tds[2]).text().trim();
+
         if (duracao) {
           precos.push({
             duracao: duracao,
@@ -216,38 +249,55 @@ class VivastreetParser {
         }
       }
     });
-    
+
     return precos;
   }
 
   // ============ HELPERS ============
 
   extractFromSpecsTable($, label) {
-    // Procura a label na tabela de specs e pega o valor correspondente
+    // Procura a label na tabela de especificações e pega o valor correspondente.
+    // Restringe a busca ao id="details-tbl-specs" (tabela real de specs do
+    // Vivastreet) quando ela existir, para não confundir com outras tabelas
+    // da página (anúncios similares, agência, cookies, etc). Se o template
+    // mudar e esse id não existir, cai de volta para busca na página toda.
+    const $tabelaSpecs = $('#details-tbl-specs');
+    const $linhas = $tabelaSpecs.length ? $tabelaSpecs.find('tr') : $('tr');
     let result = '';
-    
-    $('tr').each((i, tr) => {
+
+    $linhas.each((i, tr) => {
       const $tr = $(tr);
       const $th = $tr.find('th, td').first();
       const $td = $tr.find('td').last();
-      
+
       if ($th.text().includes(label)) {
         result = $td.text().trim();
         return false; // break
       }
     });
-    
+
     return result;
   }
 
   parseDate(dateStr) {
     // "Posted on 05 Sep, 2026" ou "Member since 01 Jan, 2024"
     try {
-      const cleaned = dateStr.replace(/Posted on|Member since/i, '').trim();
-      return new Date(cleaned).toISOString();
+      const cleaned = dateStr.replace(/Posted on|Member since|Last updated/i, '').trim();
+      const parsed = new Date(cleaned);
+      return isNaN(parsed) ? null : parsed.toISOString();
     } catch {
       return null;
     }
+  }
+
+  parseDateDMY(dateStr) {
+    // Formato real usado pelo Vivastreet: "18/02/2020" (dia/mês/ano)
+    // new Date() nativo do JS interpretaria isso como mês/dia/ano e erraria.
+    const match = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (!match) return null;
+    const [, dia, mes, ano] = match;
+    const data = new Date(Date.UTC(parseInt(ano, 10), parseInt(mes, 10) - 1, parseInt(dia, 10)));
+    return isNaN(data) ? null : data.toISOString();
   }
 
   parsePrice(priceStr) {
