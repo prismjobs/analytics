@@ -299,5 +299,6 @@ SELECT
   (SELECT service_count FROM ad_structural_features WHERE ad_id = a.id ORDER BY data_calculo DESC LIMIT 1) as service_count,
   (SELECT desc_length FROM ad_text_features WHERE ad_id = a.id ORDER BY data_calculo DESC LIMIT 1) as desc_length,
   (SELECT emoji_count FROM ad_text_features WHERE ad_id = a.id ORDER BY data_calculo DESC LIMIT 1) as emoji_count,
-  a.data_publicacao
+  a.data_publicacao,
+  a.data_ultima_atualizacao
 FROM ads a;

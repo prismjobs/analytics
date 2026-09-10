@@ -8,7 +8,7 @@ import { useAds } from '../hooks/useAds';
 export function Dashboard() {
   const { user } = useAuth();
   const userId = user?.id;
-  const { ads } = useAds(userId);
+  const { ads, error: adsError } = useAds(userId);
   const [analytics, setAnalytics] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -78,6 +78,11 @@ export function Dashboard() {
       </nav>
 
       <div className="max-w-7xl mx-auto p-4">
+        {adsError && (
+          <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm">
+            Erro ao carregar anúncios: {adsError}
+          </div>
+        )}
         {/* Tabela de anúncios */}
         <div className="mb-8">
           <AdTable ads={ads} onRefresh={handleUpdateSnapshots} loading={loading} />
