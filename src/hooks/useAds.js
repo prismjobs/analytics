@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 
 export function useAds(userId) {
@@ -6,26 +6,29 @@ export function useAds(userId) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const fetchAds = useCallback(async () => {
+    if (!userId) return;
+    try {
+      setLoading(true);
+      const { data, error: err } = await supabase
+        .from('ads')
+        .select('*, snapshots:ad_snapshots(visitors, data_snapshot)')
+        .eq('user_id', userId)
+        .order('data_ultima_atualizacao', { ascending: false })
+        .order('data_snapshot', { foreignTable: 'ad_snapshots', ascending: true });
+
+      if (err) throw err;
+      setAds(data || []);
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
   useEffect(() => {
     if (!userId) return;
-
-    const fetchAds = async () => {
-      try {
-        setLoading(true);
-        const { data, error: err } = await supabase
-          .from('ad_performance')
-          .select('*')
-          .eq('user_id', userId)
-          .order('data_ultima_atualizacao', { ascending: false });
-
-        if (err) throw err;
-        setAds(data || []);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
 
     fetchAds();
 
@@ -49,7 +52,7 @@ export function useAds(userId) {
     return () => {
       subscription.unsubscribe();
     };
-  }, [userId]);
+  }, [userId, fetchAds]);
 
-  return { ads, loading, error, refetch: () => {} };
+  return { ads, loading, error, refetch: fetchAds };
 }

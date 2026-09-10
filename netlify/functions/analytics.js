@@ -1,4 +1,12 @@
-exports.analytics = async (event) => {
+const { createClient } = require('@supabase/supabase-js');
+const { CorrelationAnalyzer } = require('../lib/textFeaturesAndAnalytics');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
+
+exports.handler = async (event) => {
   try {
     const { userId, segmento = 'all' } = JSON.parse(event.body || '{}');
 
@@ -17,7 +25,8 @@ exports.analytics = async (event) => {
 
     // 2. Aplica filtro de segmento
     if (segmento !== 'all' && segmento.includes('_')) {
-      const [tipo, valor] = segmento.split('_');
+      const [tipo, ...resto] = segmento.split('_');
+      const valor = resto.join('_');
       if (tipo === 'regiao') {
         query = query.eq('localizacao', valor);
       } else if (tipo === 'tipo') {
@@ -37,21 +46,9 @@ exports.analytics = async (event) => {
     // 3. Define features para análise
     const featureNames = [
       'desc_length',
-      'word_count',
-      'paragraph_count',
       'emoji_count',
-      'number_count',
-      'currency_count',
-      'caps_count',
-      'sentiment_score',
-      'readability_grade',
-      'adjective_count',
-      'verb_count',
-      'vocab_diversity',
       'photo_count',
-      'price_table_completeness',
-      'service_count',
-      'premium_services_count'
+      'service_count'
     ];
 
     // 4. Calcula correlações
@@ -60,11 +57,7 @@ exports.analytics = async (event) => {
     // 5. Calcula estatísticas descritivas
     const stats = {};
     featureNames.forEach(featureName => {
-      const values = ads.map(ad => {
-        const tf = ad.text_features || {};
-        const sf = ad.structural_features || {};
-        return tf[featureName] !== undefined ? tf[featureName] : sf[featureName] || 0;
-      });
+      const values = ads.map(ad => ad[featureName] || 0);
       stats[featureName] = CorrelationAnalyzer.descriptiveStats(values);
     });
 

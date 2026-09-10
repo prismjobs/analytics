@@ -8,7 +8,7 @@ import { useAds } from '../hooks/useAds';
 export function Dashboard() {
   const { user } = useAuth();
   const userId = user?.id;
-  const { ads, error: adsError } = useAds(userId);
+  const { ads, error: adsError, refetch: refetchAds } = useAds(userId);
   const [analytics, setAnalytics] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -20,6 +20,7 @@ export function Dashboard() {
   }, [userId]);
 
   const handleAdAdded = () => {
+    refetchAds();
     loadAnalytics();
   };
 
@@ -31,6 +32,7 @@ export function Dashboard() {
         method: 'POST',
         body: JSON.stringify({ userId })
       });
+      await refetchAds();
       await loadAnalytics();
     } catch (error) {
       console.error('Erro ao atualizar:', error);

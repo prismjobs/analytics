@@ -1,5 +1,6 @@
 import React from 'react';
 import { formatDistanceToNow } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 export function AdTable({ ads, onRefresh, loading }) {
   const getVisitorTrend = (ad) => {
@@ -47,7 +48,7 @@ export function AdTable({ ads, onRefresh, loading }) {
                 <td className="px-4 py-3 font-medium truncate max-w-xs">
                   {ad.titulo}
                 </td>
-                <td className="px-4 py-3">{ad.regiao}</td>
+                <td className="px-4 py-3">{ad.regiao || ad.localizacao}</td>
                 <td className="px-4 py-3">
                   <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
                     {ad.tipo_anuncio}
@@ -60,10 +61,12 @@ export function AdTable({ ads, onRefresh, loading }) {
                   {getVisitorTrend(ad)}
                 </td>
                 <td className="px-4 py-3 text-xs text-gray-500">
-                  {formatDistanceToNow(new Date(ad.data_ultima_atualizacao), {
-                    addSuffix: true,
-                    locale: 'pt-BR'
-                  })}
+                  {ad.data_ultima_atualizacao
+                    ? formatDistanceToNow(new Date(ad.data_ultima_atualizacao), {
+                        addSuffix: true,
+                        locale: ptBR
+                      })
+                    : '—'}
                 </td>
                 <td className="px-4 py-3">
                   <a

@@ -1,4 +1,12 @@
-exports.updateSnapshots = async (event) => {
+const { createClient } = require('@supabase/supabase-js');
+const VivastreetParser = require('../lib/vivastreetParser');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
+
+exports.handler = async (event) => {
   try {
     const { userId } = JSON.parse(event.body);
 
