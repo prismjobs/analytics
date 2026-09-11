@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const VivastreetParser = require('../lib/vivastreetParser');
-const { TextFeatureExtractor, CorrelationAnalyzer } = require('../lib/textFeaturesAndAnalytics');
+const { TextFeatureExtractor } = require('../lib/textFeaturesAndAnalytics');
+const { htmlParaTexto } = require('../lib/adUpdater');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -47,7 +48,7 @@ exports.handler = async (event) => {
           url: url,
           titulo: adData.titulo,
           descricao: adData.descricao,
-          descricao_plain: adData.descricao.replace(/<[^>]*>/g, ''),
+          descricao_plain: htmlParaTexto(adData.descricao),
           localizacao: adData.localizacao,
           regiao: adData.regiao,
           tipo_anuncio: adData.tipo_anuncio,

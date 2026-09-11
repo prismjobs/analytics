@@ -28,6 +28,27 @@ function formatarDataCurta(isoString) {
 }
 
 /**
+ * Converte a descrição em HTML (armazenada em ad.descricao) para texto
+ * plano preservando quebras de parágrafo. Fazemos essa conversão aqui no
+ * frontend — em vez de usar dangerouslySetInnerHTML — para nunca renderizar
+ * HTML de terceiros diretamente na página (evita risco de XSS vindo do
+ * texto do próprio anúncio raspado).
+ */
+function htmlParaTextoComQuebras(html) {
+  if (!html) return '';
+  return html
+    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
  * Monta a tabela de histórico já com a variação calculada
  * entre cada captura e a captura anterior.
  */
@@ -59,6 +80,11 @@ export function AdDetailModal({ ad, isOpen, onClose }) {
     historico.length >= 2
       ? historico[historico.length - 1].visitors - historico[0].visitors
       : null;
+
+  // Prioriza o HTML bruto (preserva parágrafos); usa o texto plano salvo
+  // no banco como reserva, para anúncios cadastrados antes desta correção
+  const descricaoTexto =
+    htmlParaTextoComQuebras(ad.descricao) || ad.descricao_plain || '';
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
@@ -111,8 +137,9 @@ export function AdDetailModal({ ad, isOpen, onClose }) {
 
             {historico.length === 0 && (
               <p className="text-sm text-gray-500 bg-gray-50 p-4 rounded-lg">
-                Nenhuma captura registrada ainda. Clique em "Atualizar visitors" no
-                painel principal para começar a acumular histórico deste anúncio.
+                Nenhuma captura registrada ainda. Clique em "🔄 Atualizar" (na linha
+                deste anúncio) ou em "Atualizar todos" para começar a acumular
+                histórico.
               </p>
             )}
 
@@ -182,6 +209,18 @@ export function AdDetailModal({ ad, isOpen, onClose }) {
                   </tbody>
                 </table>
               </div>
+            )}
+          </section>
+
+          {/* ===== DESCRIÇÃO ===== */}
+          <section>
+            <h3 className="text-lg font-semibold mb-3">📝 Descrição</h3>
+            {descricaoTexto ? (
+              <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-700 whitespace-pre-line max-h-64 overflow-y-auto">
+                {descricaoTexto}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">Nenhuma descrição capturada.</p>
             )}
           </section>
 

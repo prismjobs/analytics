@@ -194,11 +194,15 @@ class VivastreetParser {
 
   extractServicos($) {
     const servicos = [];
+    const MAX_NOME_LENGTH = 60; // nome real de serviço é curto (ex: "Massage")
+    const MAX_SERVICOS = 60; // trava de segurança contra páginas fora do padrão
 
     // IMPORTANTE: escopo restrito à tabela de serviços (data-automation="tblServices").
     // Antes buscava "ul li" na página inteira e capturava menu, breadcrumbs,
     // tags populares, banner de cookies, etc. como se fossem serviços.
     $('table[data-automation="tblServices"] li').each((i, li) => {
+      if (servicos.length >= MAX_SERVICOS) return false; // break
+
       const $li = $(li);
       const automation = ($li.attr('data-automation') || '').toLowerCase();
       const classe = $li.attr('class') || '';
@@ -213,7 +217,11 @@ class VivastreetParser {
       $clone.find('span').remove();
       const nome = $clone.text().trim();
 
-      if (nome) {
+      // Filtro de segurança: se o "nome" vier muito longo ou com quebra de
+      // linha, provavelmente a extração pegou o elemento errado (página com
+      // template diferente do esperado) — melhor descartar do que gravar
+      // lixo no banco de dados.
+      if (nome && nome.length <= MAX_NOME_LENGTH && !nome.includes('\n')) {
         servicos.push({
           nome: nome,
           incluido: incluido,
@@ -227,11 +235,15 @@ class VivastreetParser {
 
   extractPrecos($) {
     const precos = [];
+    const MAX_DURACAO_LENGTH = 30;
+    const MAX_LINHAS = 20;
 
     // IMPORTANTE: escopo restrito à tabela de preços (data-automation="tblRates").
     // Antes buscava "table tr" na página inteira, pegando linhas de outras
     // tabelas (anúncios similares, cookies, etc.) por engano.
     $('table[data-automation="tblRates"] tr').each((i, tr) => {
+      if (precos.length >= MAX_LINHAS) return false; // break
+
       const $tr = $(tr);
       const $tds = $tr.find('td');
 
@@ -240,7 +252,7 @@ class VivastreetParser {
         const incall = $($tds[1]).text().trim();
         const outcall = $($tds[2]).text().trim();
 
-        if (duracao) {
+        if (duracao && duracao.length <= MAX_DURACAO_LENGTH) {
           precos.push({
             duracao: duracao,
             preco_incall: this.parsePrice(incall),
