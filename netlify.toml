@@ -1,5 +1,7 @@
 [build]
-  command = "npm run build"
+  # O install roda junto do build para garantir que as dependências existam
+  # mesmo quando o ambiente não faz a etapa de instalação separadamente.
+  command = "npm install --no-audit --no-fund && npm run build"
   functions = "netlify/functions"
   publish = "build"
 

@@ -13,9 +13,7 @@
     "axios": "^1.5.0",
     "cheerio": "^1.0.0-rc.12",
     "sentiment": "^5.0.2",
-    "natural": "^6.7.0"
-  },
-  "devDependencies": {
+    "natural": "^6.7.0",
     "react-scripts": "5.0.1"
   },
   "scripts": {

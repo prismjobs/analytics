@@ -22,7 +22,6 @@ class TextFeatureExtractor {
 
     const texto = this.cleanText(descricao);
     const palavras = this.tokenizer.tokenize(texto.toLowerCase());
-    const sentencas = texto.match(/[.!?]+/g) || [];
 
     return {
       // Tamanho e estrutura
@@ -65,8 +64,6 @@ class TextFeatureExtractor {
    * Extrai features estruturais do anúncio inteiro
    */
   extractStructuralFeatures(ad) {
-    const now = new Date();
-    
     return {
       photo_count: ad.fotos ? ad.fotos.length : 0,
       price_table_completeness: this.calculatePriceCompleteness(ad.precos),
