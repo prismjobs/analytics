@@ -1,5 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+
+// Topic exclusivo por subscription: canais são reaproveitados por topic, e
+// registrar 'postgres_changes' num canal já inscrito lança erro. Mesmo motivo
+// descrito em useMonitoramentos.js.
+let proximoCanal = 0;
 
 export function useAds(userId) {
   const [ads, setAds] = useState([]);
@@ -37,14 +42,21 @@ export function useAds(userId) {
     }
   }, [userId]);
 
+  // O fetch vive num ref para o efeito depender apenas do userId, sem
+  // recriar a subscription a cada nova identidade de fetchAds.
+  const fetchRef = useRef(fetchAds);
+  useEffect(() => {
+    fetchRef.current = fetchAds;
+  }, [fetchAds]);
+
   useEffect(() => {
     if (!userId) return;
 
-    fetchAds();
+    fetchRef.current();
 
     // Subscribe a mudanças em tempo real
-    const subscription = supabase
-      .channel(`ads:${userId}`)
+    const canal = supabase
+      .channel(`ads:${userId}:${++proximoCanal}`)
       .on(
         'postgres_changes',
         {
@@ -54,15 +66,15 @@ export function useAds(userId) {
           filter: `user_id=eq.${userId}`
         },
         () => {
-          fetchAds(); // Recarrega quando houver mudanças
+          fetchRef.current(); // Recarrega quando houver mudanças
         }
       )
       .subscribe();
 
     return () => {
-      subscription.unsubscribe();
+      supabase.removeChannel(canal);
     };
-  }, [userId, fetchAds]);
+  }, [userId]);
 
   return { ads, loading, error, refetch: fetchAds };
 }

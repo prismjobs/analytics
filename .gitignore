@@ -1,0 +1,18 @@
+# Dependências
+node_modules/
+
+# Saída do build
+build/
+
+# Variáveis de ambiente locais
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Netlify
+.netlify/
+
+# Sistema operacional
+.DS_Store
