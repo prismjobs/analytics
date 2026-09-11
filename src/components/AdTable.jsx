@@ -5,32 +5,7 @@ import { AdDetailModal } from './AdDetailModal';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
 import { api } from '../lib/api';
-
-/**
- * Calcula o crescimento total de visitantes: da 1ª captura até a última.
- * É diferente de "trend" (que compararia só as duas últimas capturas) —
- * aqui é o crescimento acumulado desde que o anúncio começou a ser
- * monitorado, que é o número que realmente importa para saber quais
- * anúncios estão performando melhor ao longo do tempo.
- */
-function calcularCrescimento(ad) {
-  const snaps = [...(ad.snapshots || [])].sort(
-    (a, b) => new Date(a.data_snapshot) - new Date(b.data_snapshot)
-  );
-  if (snaps.length < 2) return null;
-
-  const primeira = snaps[0];
-  const ultima = snaps[snaps.length - 1];
-  const absoluto = ultima.visitors - primeira.visitors;
-  const percentual = primeira.visitors > 0 ? (absoluto / primeira.visitors) * 100 : null;
-
-  return {
-    absoluto,
-    percentual,
-    dataPrimeira: primeira.data_snapshot,
-    dataUltima: ultima.data_snapshot
-  };
-}
+import { calcularCrescimento } from '../lib/metrics';
 
 function getValorOrdenavel(linha, campo) {
   switch (campo) {

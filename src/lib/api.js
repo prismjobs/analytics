@@ -1,3 +1,11 @@
+import { supabase } from './supabase';
+
+async function authHeader() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Sessão não encontrada — faça login novamente');
+  return { Authorization: `Bearer ${session.access_token}` };
+}
+
 export const api = {
   async parseAd(url, userId) {
     const response = await fetch('/.netlify/functions/parseAd', {
@@ -39,5 +47,39 @@ export const api = {
       body: JSON.stringify({ userId, segmento })
     });
     return response.json();
+  },
+
+  // ===== Administração de usuários (apenas admin) =====
+
+  async listUsers() {
+    const response = await fetch('/.netlify/functions/listUsers', {
+      method: 'POST',
+      headers: await authHeader()
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Erro ao listar usuários');
+    return data.usuarios;
+  },
+
+  async createUser(email, password) {
+    const response = await fetch('/.netlify/functions/createUser', {
+      method: 'POST',
+      headers: { ...(await authHeader()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Erro ao criar usuário');
+    return data;
+  },
+
+  async manageUser(action, targetUserId, extra = {}) {
+    const response = await fetch('/.netlify/functions/manageUser', {
+      method: 'POST',
+      headers: { ...(await authHeader()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, targetUserId, ...extra })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Erro ao gerenciar usuário');
+    return data;
   }
 };

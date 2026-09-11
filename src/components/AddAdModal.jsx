@@ -1,11 +1,42 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { useMonitoramentos } from '../hooks/useMonitoramentos';
 
-export function AddAdModal({ isOpen, onClose, onAdded }) {
+export function AddAdModal({ isOpen, onClose, onAdded, monitoramentoSugeridoId }) {
   const [url, setUrl] = useState('');
+  const [monitoramentoId, setMonitoramentoId] = useState('');
+  const [novoNomeGrupo, setNovoNomeGrupo] = useState('');
+  const [criandoGrupo, setCriandoGrupo] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const { user } = useAuth();
+  const { monitoramentos, criar: criarMonitoramento } = useMonitoramentos(user?.id);
+
+  // Ao abrir o modal, pré-seleciona: o monitoramento da aba em que o usuário
+  // estava (se houver) ou o primeiro disponível na lista
+  useEffect(() => {
+    if (!isOpen) return;
+    if (monitoramentoSugeridoId && monitoramentoSugeridoId !== 'todos' && monitoramentoSugeridoId !== 'sem-grupo') {
+      setMonitoramentoId(monitoramentoSugeridoId);
+    } else if (monitoramentos.length > 0 && !monitoramentoId) {
+      setMonitoramentoId(monitoramentos[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, monitoramentoSugeridoId, monitoramentos]);
+
+  if (!isOpen) return null;
+
+  const handleCriarGrupo = async () => {
+    if (!novoNomeGrupo.trim()) return;
+    try {
+      const novo = await criarMonitoramento({ nome: novoNomeGrupo.trim() });
+      setMonitoramentoId(novo.id);
+      setNovoNomeGrupo('');
+      setCriandoGrupo(false);
+    } catch (err) {
+      setError(err.message.includes('duplicate') ? 'Já existe um monitoramento com esse nome' : err.message);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -17,7 +48,8 @@ export function AddAdModal({ isOpen, onClose, onAdded }) {
         method: 'POST',
         body: JSON.stringify({
           url: url.trim(),
-          userId: user.id
+          userId: user.id,
+          monitoramentoId: monitoramentoId || null
         })
       });
 
@@ -37,14 +69,74 @@ export function AddAdModal({ isOpen, onClose, onAdded }) {
     }
   };
 
-  if (!isOpen) return null;
-
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4">
         <h2 className="text-2xl font-bold mb-6">Adicionar novo anúncio</h2>
 
         <form onSubmit={handleSubmit}>
+          <div className="mb-4">
+            <label className="block text-sm font-medium mb-2">Monitoramento</label>
+
+            {!criandoGrupo ? (
+              <div className="flex gap-2">
+                <select
+                  value={monitoramentoId}
+                  onChange={(e) => setMonitoramentoId(e.target.value)}
+                  className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={loading}
+                >
+                  <option value="">Sem grupo</option>
+                  {monitoramentos.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.nome}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setCriandoGrupo(true)}
+                  className="px-3 py-2 border rounded-lg text-sm text-blue-600 hover:bg-blue-50 whitespace-nowrap"
+                  disabled={loading}
+                >
+                  + Novo
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={novoNomeGrupo}
+                  onChange={(e) => setNovoNomeGrupo(e.target.value)}
+                  placeholder="Nome do novo monitoramento"
+                  className="flex-1 px-3 py-2 border rounded-lg"
+                  autoFocus
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={handleCriarGrupo}
+                  className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+                  disabled={loading}
+                >
+                  Criar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCriandoGrupo(false)}
+                  className="px-3 py-2 border rounded-lg text-sm hover:bg-gray-50"
+                  disabled={loading}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+            <p className="text-xs text-gray-500 mt-2">
+              Organize os anúncios em grupos (ex: por região, por concorrente) para
+              navegar entre eles depois nas abas do painel.
+            </p>
+          </div>
+
           <div className="mb-4">
             <label className="block text-sm font-medium mb-2">
               URL do anúncio Vivastreet
@@ -58,9 +150,6 @@ export function AddAdModal({ isOpen, onClose, onAdded }) {
               required
               disabled={loading}
             />
-            <p className="text-xs text-gray-500 mt-2">
-              Cole a URL completa do anúncio do Vivastreet
-            </p>
           </div>
 
           {error && (

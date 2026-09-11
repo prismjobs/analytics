@@ -16,7 +16,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { url, userId } = JSON.parse(event.body);
+    const { url, userId, monitoramentoId } = JSON.parse(event.body);
 
     if (!url || !userId) {
       return {
@@ -46,6 +46,7 @@ exports.handler = async (event) => {
           site: adData.site,
           ad_id_externo: adData.ad_id_externo,
           url: url,
+          monitoramento_id: monitoramentoId || null,
           titulo: adData.titulo,
           descricao: adData.descricao,
           descricao_plain: htmlParaTexto(adData.descricao),
