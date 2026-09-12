@@ -15,13 +15,19 @@ const supabase = createClient(
 // Agora o frontend chama esta function uma vez por anúncio, sequencialmente
 // (o próximo só começa depois que o anterior terminar), então cada chamada
 // só precisa ter tempo de fazer o scraping de 1 página.
+//
+// O parâmetro `modo` define O QUE é atualizado:
+//   'visitors'  (padrão) — apenas o contador de visitantes + novo snapshot.
+//                Não encosta em título, descrição, fotos, preços, serviços.
+//   'telefone'  — apenas recaptura o número de telefone.
+//   'completo'  — recaptura todo o conteúdo (ação explícita do usuário).
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' };
   }
 
   try {
-    const { userId, adId } = JSON.parse(event.body);
+    const { userId, adId, modo } = JSON.parse(event.body);
 
     if (!userId || !adId) {
       return {
@@ -45,7 +51,7 @@ exports.handler = async (event) => {
     }
 
     const parser = new VivastreetParser();
-    const resultado = await updateSingleAd(supabase, parser, ad);
+    const resultado = await updateSingleAd(supabase, parser, ad, modo);
 
     return {
       statusCode: 200,

@@ -19,10 +19,19 @@ export const api = {
   // também pelo "Atualizar todos", que agora chama isto sequencialmente
   // (um anúncio por vez) em vez de tentar tudo numa única requisição —
   // evitando o timeout que acontecia com muitos anúncios cadastrados.
-  async updateAd(userId, adId) {
+  //
+  // `modo` decide o que a atualização toca no banco:
+  //   'visitors' (padrão) → só o contador de visitantes + novo snapshot.
+  //                         Nenhum dado coletado (descrição, fotos, preços,
+  //                         serviços) é sobrescrito. É o modo seguro para
+  //                         anúncios que podem ter saído do ar.
+  //   'telefone'          → só o telefone (data-phone-number da página).
+  //   'completo'          → recaptura tudo; só usar de propósito, num
+  //                         anúncio que se sabe estar no ar.
+  async updateAd(userId, adId, modo = 'visitors') {
     const response = await fetch('/.netlify/functions/updateAd', {
       method: 'POST',
-      body: JSON.stringify({ userId, adId })
+      body: JSON.stringify({ userId, adId, modo })
     });
     const data = await response.json();
     if (!response.ok) {
@@ -33,10 +42,10 @@ export const api = {
 
   // Mantida para uso futuro (ex: automação via cron fora do navegador).
   // O botão "Atualizar todos" do frontend não usa mais esta função.
-  async updateSnapshots(userId) {
+  async updateSnapshots(userId, modo = 'visitors') {
     const response = await fetch('/.netlify/functions/updateSnapshots', {
       method: 'POST',
-      body: JSON.stringify({ userId })
+      body: JSON.stringify({ userId, modo })
     });
     return response.json();
   },

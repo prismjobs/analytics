@@ -17,7 +17,7 @@ const supabase = createClient(
 // futuro, como uma automação via cron/agendamento fora do navegador.
 exports.handler = async (event) => {
   try {
-    const { userId } = JSON.parse(event.body);
+    const { userId, modo } = JSON.parse(event.body);
 
     if (!userId) {
       return {
@@ -45,7 +45,7 @@ exports.handler = async (event) => {
 
     for (const ad of ads) {
       try {
-        const resultado = await updateSingleAd(supabase, parser, ad);
+        const resultado = await updateSingleAd(supabase, parser, ad, modo);
         resultados.push(resultado);
       } catch (error) {
         console.error(`Erro ao atualizar anúncio ${ad.id} (${ad.url}):`, error.message);
@@ -63,6 +63,7 @@ exports.handler = async (event) => {
     }
 
     const sucesso = resultados.filter(r => r.status === 'ok').length;
+    const offline = resultados.filter(r => r.status === 'offline').length;
 
     return {
       statusCode: 200,
@@ -70,7 +71,8 @@ exports.handler = async (event) => {
         success: true,
         total: ads.length,
         atualizados_com_sucesso: sucesso,
-        falhas: ads.length - sucesso,
+        fora_do_ar: offline,
+        falhas: ads.length - sucesso - offline,
         detalhes: resultados
       })
     };

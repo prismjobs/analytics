@@ -17,6 +17,8 @@ function getValorOrdenavel(linha, campo) {
       return (linha.regiao || linha.localizacao || '').toLowerCase();
     case 'titulo':
       return (linha.titulo || '').toLowerCase();
+    case 'telefone':
+      return (linha.telefone || '').toLowerCase();
     case 'tipo_anuncio':
       return (linha.tipo_anuncio || '').toLowerCase();
     case 'visitors_atual':
@@ -49,6 +51,8 @@ export function AdTable({ ads }) {
   const [excluindoIds, setExcluindoIds] = useState(new Set());
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [bulkProgress, setBulkProgress] = useState(null);
+  const [bulkResumo, setBulkResumo] = useState(null);
+  const [recapturandoId, setRecapturandoId] = useState(null);
 
   const regioesDisponiveis = useMemo(
     () => [...new Set(ads.map((a) => a.regiao || a.localizacao).filter(Boolean))].sort(),
@@ -112,14 +116,33 @@ export function AdTable({ ads }) {
     );
   };
 
-  const handleAtualizarUm = async (ad) => {
+  // `modo` é sempre explícito: 'visitors' não encosta em nenhum dado
+  // coletado (descrição, fotos, preços, serviços) — só lê o contador e grava
+  // um novo snapshot. Era justamente a atualização genérica que apagava o
+  // registro inteiro quando o anúncio saía do ar.
+  const handleAtualizarUm = async (ad, modo = 'visitors') => {
     if (!user?.id) return;
     setAtualizandoIds((prev) => new Set(prev).add(ad.id));
     try {
-      await api.updateAd(user.id, ad.id);
+      const resultado = await api.updateAd(user.id, ad.id, modo);
       // A lista se atualiza sozinha via subscription em tempo real (useAds)
+      if (resultado?.status === 'offline') {
+        alert(
+          `"${ad.titulo}" parece estar fora do ar:\n${resultado.mensagem || ''}\n\n` +
+            'Os dados já coletados foram preservados e o anúncio foi marcado como fora do ar.'
+        );
+      } else if (resultado?.status === 'sem_contador') {
+        alert(
+          `Não foi possível ler o contador de visitantes de "${ad.titulo}". ` +
+            'Nada foi sobrescrito e nenhuma captura falsa foi registrada.'
+        );
+      } else if (modo === 'telefone' && resultado?.status === 'sem_telefone') {
+        alert(`"${ad.titulo}" não expõe telefone na página.`);
+      }
+      return resultado;
     } catch (e) {
       alert(`Não foi possível atualizar "${ad.titulo}":\n${e.message}`);
+      return null;
     } finally {
       setAtualizandoIds((prev) => {
         const next = new Set(prev);
@@ -129,20 +152,34 @@ export function AdTable({ ads }) {
     }
   };
 
-  // Atualiza todos os anúncios um de cada vez, aguardando o anterior
-  // terminar antes de começar o próximo. Isso evita o timeout que
-  // acontecia ao tentar atualizar todos numa única chamada ao servidor.
-  const handleAtualizarTodos = async () => {
+  // Percorre os anúncios um de cada vez, aguardando o anterior terminar antes
+  // de começar o próximo. Isso evita o timeout que acontecia ao tentar
+  // atualizar todos numa única chamada ao servidor.
+  const executarEmLote = async (modo, rotulo) => {
     if (!user?.id || linhasFiltradasOrdenadas.length === 0) return;
     setBulkUpdating(true);
+    setBulkResumo(null);
+
+    const contagem = { ok: 0, foraDoAr: 0, semDado: 0, falhas: 0 };
+    let migracaoPendente = false;
 
     for (let i = 0; i < linhasFiltradasOrdenadas.length; i++) {
       const ad = linhasFiltradasOrdenadas[i];
-      setBulkProgress({ atual: i + 1, total: linhasFiltradasOrdenadas.length, titulo: ad.titulo });
+      setBulkProgress({
+        atual: i + 1,
+        total: linhasFiltradasOrdenadas.length,
+        titulo: ad.titulo,
+        rotulo
+      });
       setAtualizandoIds((prev) => new Set(prev).add(ad.id));
       try {
-        await api.updateAd(user.id, ad.id);
+        const resultado = await api.updateAd(user.id, ad.id, modo);
+        if (resultado?.migracaoPendente) migracaoPendente = true;
+        if (resultado?.status === 'ok') contagem.ok++;
+        else if (resultado?.status === 'offline') contagem.foraDoAr++;
+        else contagem.semDado++;
       } catch (e) {
+        contagem.falhas++;
         console.error(`Falha ao atualizar "${ad.titulo}":`, e.message);
       } finally {
         setAtualizandoIds((prev) => {
@@ -155,6 +192,26 @@ export function AdTable({ ads }) {
 
     setBulkProgress(null);
     setBulkUpdating(false);
+    setBulkResumo({ rotulo, ...contagem, migracaoPendente });
+  };
+
+  const handleAtualizarVisitantes = () => executarEmLote('visitors', 'visitantes');
+  const handleAtualizarTelefones = () => executarEmLote('telefone', 'telefones');
+
+  // Recaptura completa: única ação que sobrescreve conteúdo coletado, e só
+  // acontece por pedido explícito dentro do anúncio.
+  const handleRecapturar = async (ad) => {
+    const confirmado = window.confirm(
+      `Recapturar TODOS os dados de "${ad.titulo}"?\n\nDescrição, fotos, preços e serviços serão substituídos pelo que estiver na página agora. Se o anúncio estiver fora do ar, a recaptura é abortada e nada é sobrescrito.`
+    );
+    if (!confirmado) return;
+
+    setRecapturandoId(ad.id);
+    try {
+      await handleAtualizarUm(ad, 'completo');
+    } finally {
+      setRecapturandoId(null);
+    }
   };
 
   const handleExcluir = async (ad) => {
@@ -186,6 +243,7 @@ export function AdTable({ ads }) {
     { campo: 'titulo', label: 'Título', ordenavel: true, align: 'left' },
     { campo: 'regiao', label: 'Região', ordenavel: true, align: 'left' },
     { campo: 'tipo_anuncio', label: 'Tipo', ordenavel: true, align: 'left' },
+    { campo: 'telefone', label: 'Telefone', ordenavel: true, align: 'left' },
     { campo: 'visitors_atual', label: 'Visitors', ordenavel: true, align: 'center' },
     { campo: 'crescimento', label: 'Crescimento', ordenavel: true, align: 'center' },
     { campo: 'snapshotCount', label: 'Capturas', ordenavel: true, align: 'center' },
@@ -200,21 +258,82 @@ export function AdTable({ ads }) {
           Meus anúncios ({linhasFiltradasOrdenadas.length}
           {linhasFiltradasOrdenadas.length !== ads.length ? ` de ${ads.length}` : ''})
         </h2>
-        <button
-          onClick={handleAtualizarTodos}
-          disabled={bulkUpdating || ads.length === 0}
-          className="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 text-sm whitespace-nowrap"
-        >
-          {bulkUpdating
-            ? `Atualizando ${bulkProgress?.atual}/${bulkProgress?.total}...`
-            : 'Atualizar todos'}
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleAtualizarVisitantes}
+            disabled={bulkUpdating || ads.length === 0}
+            className="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 text-sm whitespace-nowrap"
+            title="Lê o contador de visitantes de cada anúncio e grava uma nova captura. Não altera nenhum outro dado."
+          >
+            {bulkUpdating && bulkProgress?.rotulo === 'visitantes'
+              ? `Atualizando ${bulkProgress?.atual}/${bulkProgress?.total}...`
+              : '🔄 Atualizar visitantes'}
+          </button>
+          <button
+            onClick={handleAtualizarTelefones}
+            disabled={bulkUpdating || ads.length === 0}
+            className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm whitespace-nowrap"
+            title="Relê a página de cada anúncio e grava o número do atributo data-phone-number. Não altera nenhum outro dado."
+          >
+            {bulkUpdating && bulkProgress?.rotulo === 'telefones'
+              ? `Buscando telefone ${bulkProgress?.atual}/${bulkProgress?.total}...`
+              : '📞 Atualizar telefones'}
+          </button>
+        </div>
       </div>
 
       {bulkUpdating && bulkProgress && (
         <div className="px-4 py-2 bg-blue-50 border-b text-xs text-blue-700">
-          Atualizando agora: <span className="font-medium">{bulkProgress.titulo}</span> — os
-          demais anúncios continuam na fila e serão atualizados um por um.
+          Atualizando {bulkProgress.rotulo} de{' '}
+          <span className="font-medium">{bulkProgress.titulo}</span> — os demais anúncios
+          continuam na fila e serão processados um por um.
+        </div>
+      )}
+
+      {bulkResumo && !bulkUpdating && (
+        <div className="px-4 py-2 bg-gray-50 border-b text-xs text-gray-700 flex justify-between items-start gap-3">
+          <div>
+            <span className="font-medium">
+              {bulkResumo.rotulo === 'telefones'
+                ? 'Atualização de telefones concluída:'
+                : 'Atualização de visitantes concluída:'}
+            </span>{' '}
+            {bulkResumo.ok} atualizado{bulkResumo.ok === 1 ? '' : 's'}
+            {bulkResumo.foraDoAr > 0 && (
+              <>
+                {' · '}
+                <span className="text-amber-700">
+                  {bulkResumo.foraDoAr} fora do ar (dados preservados)
+                </span>
+              </>
+            )}
+            {bulkResumo.semDado > 0 && (
+              <>
+                {' · '}
+                {bulkResumo.semDado} sem o dado na página
+              </>
+            )}
+            {bulkResumo.falhas > 0 && (
+              <>
+                {' · '}
+                <span className="text-red-700">{bulkResumo.falhas} com erro</span>
+              </>
+            )}
+            {bulkResumo.migracaoPendente && (
+              <p className="text-amber-700 mt-1">
+                ⚠ As colunas de telefone e de status "fora do ar" ainda não existem no banco.
+                Rode o arquivo <code>migration_003_telefone_e_status_offline.sql</code> no SQL
+                Editor do Supabase para passar a gravar esses dados.
+              </p>
+            )}
+          </div>
+          <button
+            onClick={() => setBulkResumo(null)}
+            className="text-gray-400 hover:text-gray-600 shrink-0"
+            aria-label="Fechar resumo"
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -281,7 +400,7 @@ export function AdTable({ ads }) {
                   ))}
                 </select>
               </th>
-              <th colSpan={4}></th>
+              <th colSpan={5}></th>
               <th className="px-2 py-2 text-right">
                 {filtrosAtivos && (
                   <button
@@ -302,7 +421,19 @@ export function AdTable({ ads }) {
 
               return (
                 <tr key={ad.id} className="border-b hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium truncate max-w-xs">{ad.titulo}</td>
+                  <td className="px-4 py-3 font-medium max-w-xs">
+                    <span className="block truncate" title={ad.titulo}>
+                      {ad.titulo}
+                    </span>
+                    {ad.offline && (
+                      <span
+                        className="inline-block mt-1 text-[11px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full"
+                        title="A página não respondeu como um anúncio ativo na última verificação. Os dados coletados foram preservados."
+                      >
+                        ⚠ fora do ar
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     {ad.regiao || ad.localizacao || (
                       <span className="text-gray-400 text-xs">não capturado</span>
@@ -315,6 +446,23 @@ export function AdTable({ ads }) {
                       </span>
                     ) : (
                       '—'
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-xs">
+                    {ad.telefone ? (
+                      <a
+                        href={`tel:${ad.telefone}`}
+                        className="text-blue-700 hover:underline whitespace-nowrap"
+                        title={
+                          ad.telefone_capturado_em
+                            ? `Capturado em ${new Date(ad.telefone_capturado_em).toLocaleString('pt-BR')}`
+                            : undefined
+                        }
+                      >
+                        {ad.telefone}
+                      </a>
+                    ) : (
+                      <span className="text-gray-400">não capturado</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-center font-semibold">{ad.visitors_atual}</td>
@@ -362,12 +510,20 @@ export function AdTable({ ads }) {
                         Detalhes
                       </button>
                       <button
-                        onClick={() => handleAtualizarUm(ad)}
+                        onClick={() => handleAtualizarUm(ad, 'visitors')}
                         disabled={atualizando || bulkUpdating}
                         className="text-green-600 hover:underline text-xs font-medium disabled:opacity-50 disabled:no-underline"
-                        title="Atualizar apenas este anúncio"
+                        title="Lê só o contador de visitantes e grava uma nova captura. Nenhum outro dado é alterado."
                       >
-                        {atualizando ? 'Atualizando...' : '🔄 Atualizar'}
+                        {atualizando ? 'Atualizando...' : '🔄 Visitantes'}
+                      </button>
+                      <button
+                        onClick={() => handleAtualizarUm(ad, 'telefone')}
+                        disabled={atualizando || bulkUpdating}
+                        className="text-blue-600 hover:underline text-xs font-medium disabled:opacity-50 disabled:no-underline"
+                        title="Relê a página e grava só o telefone"
+                      >
+                        📞 Telefone
                       </button>
                       <a
                         href={ad.url}
@@ -411,6 +567,8 @@ export function AdTable({ ads }) {
         ad={selectedAd}
         isOpen={!!selectedAdId}
         onClose={() => setSelectedAdId(null)}
+        onRecapturar={handleRecapturar}
+        recapturando={recapturandoId === selectedAdId}
       />
     </div>
   );

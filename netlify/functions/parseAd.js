@@ -1,7 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const VivastreetParser = require('../lib/vivastreetParser');
 const { TextFeatureExtractor } = require('../lib/textFeaturesAndAnalytics');
-const { htmlParaTexto } = require('../lib/adUpdater');
+const { htmlParaTexto, ehErroDeColunaInexistente, semColunasNovas } = require('../lib/adUpdater');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -38,33 +38,45 @@ exports.handler = async (event) => {
     const adData = await parser.parse(url);
 
     // 3. Salva na base de dados
-    const { data: savedAd, error: adError } = await supabase
-      .from('ads')
-      .insert([
-        {
-          user_id: userId,
-          site: adData.site,
-          ad_id_externo: adData.ad_id_externo,
-          url: url,
-          monitoramento_id: monitoramentoId || null,
-          titulo: adData.titulo,
-          descricao: adData.descricao,
-          descricao_plain: htmlParaTexto(adData.descricao),
-          localizacao: adData.localizacao,
-          regiao: adData.regiao,
-          tipo_anuncio: adData.tipo_anuncio,
-          genero: adData.genero,
-          idade: adData.idade,
-          etnia: adData.etnia,
-          idiomas: adData.idiomas,
-          publico_alvo: adData.publico_alvo,
-          data_publicacao: adData.data_publicacao,
-          membro_desde: adData.membro_desde,
-          visitors_atual: adData.visitors,
-          data_ultima_atualizacao: new Date().toISOString()
-        }
-      ])
-      .select();
+    //    `telefone` só existe depois da migration_003; se a migration ainda
+    //    não foi aplicada, o insert é repetido sem esse campo para o cadastro
+    //    do anúncio não falhar por causa disso.
+    const registro = {
+      user_id: userId,
+      site: adData.site,
+      ad_id_externo: adData.ad_id_externo,
+      url: url,
+      monitoramento_id: monitoramentoId || null,
+      titulo: adData.titulo,
+      descricao: adData.descricao,
+      descricao_plain: htmlParaTexto(adData.descricao),
+      localizacao: adData.localizacao,
+      regiao: adData.regiao,
+      tipo_anuncio: adData.tipo_anuncio,
+      genero: adData.genero,
+      idade: adData.idade,
+      etnia: adData.etnia,
+      idiomas: adData.idiomas,
+      publico_alvo: adData.publico_alvo,
+      telefone: adData.telefone || null,
+      telefone_capturado_em: adData.telefone ? new Date().toISOString() : null,
+      data_publicacao: adData.data_publicacao,
+      membro_desde: adData.membro_desde,
+      visitors_atual: adData.visitors ?? 0,
+      data_ultima_atualizacao: new Date().toISOString(),
+      ultima_verificacao: new Date().toISOString()
+    };
+
+    let { data: savedAd, error: adError } = await supabase.from('ads').insert([registro]).select();
+    let migracaoPendente = false;
+
+    if (adError && ehErroDeColunaInexistente(adError)) {
+      migracaoPendente = true;
+      ({ data: savedAd, error: adError } = await supabase
+        .from('ads')
+        .insert([semColunasNovas(registro)])
+        .select());
+    }
 
     if (adError) {
       // Log
@@ -137,15 +149,19 @@ exports.handler = async (event) => {
       }
     ]);
 
-    // 9. Snapshot inicial
-    await supabase.from('ad_snapshots').insert([
-      {
-        ad_id: adId,
-        visitors: adData.visitors,
-        data_snapshot: new Date().toISOString(),
-        last_updated_site: adData.data_publicacao
-      }
-    ]);
+    // 9. Snapshot inicial — apenas quando o contador de visitantes foi
+    //    realmente lido. Gravar 0 por falha de leitura estragaria o cálculo
+    //    de crescimento (apareceria como queda real depois).
+    if (adData.visitors !== null && adData.visitors !== undefined) {
+      await supabase.from('ad_snapshots').insert([
+        {
+          ad_id: adId,
+          visitors: adData.visitors,
+          data_snapshot: new Date().toISOString(),
+          last_updated_site: adData.data_publicacao
+        }
+      ]);
+    }
 
     // Log de sucesso
     await supabase.from('parse_logs').insert([{
@@ -162,9 +178,11 @@ exports.handler = async (event) => {
         ad_id: adId,
         titulo: adData.titulo,
         visitors: adData.visitors,
+        telefone: adData.telefone || null,
         fotos: adData.fotos.length,
         servicos: adData.servicos.length,
-        precos: adData.precos.length
+        precos: adData.precos.length,
+        migracaoPendente
       })
     };
   } catch (error) {
