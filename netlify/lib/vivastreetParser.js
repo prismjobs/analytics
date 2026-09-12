@@ -17,19 +17,74 @@ class VivastreetParser {
     return url.includes('vivastreet.co.uk');
   }
 
-  // Função principal de parsing
+  /**
+   * Baixa a página do anúncio e devolve o documento carregado junto com um
+   * diagnóstico de disponibilidade.
+   *
+   * IMPORTANTE: `validateStatus` aceita respostas 4xx de propósito. Quando um
+   * anúncio termina, o site responde 404/410 (ou devolve uma página genérica
+   * com status 200). Nos dois casos precisamos DETECTAR isso e avisar quem
+   * chamou, em vez de estourar uma exceção genérica — é essa informação que
+   * impede o sistema de gravar uma página vazia em cima dos dados já
+   * coletados do anúncio.
+   */
+  async carregar(url) {
+    const resposta = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
+      timeout: 15000,
+      maxRedirects: 5,
+      validateStatus: (status) => status < 500
+    });
+
+    const $ = cheerio.load(resposta.data || '');
+    const motivoIndisponivel = this.detectarIndisponibilidade($, resposta.status);
+
+    return {
+      $,
+      status: resposta.status,
+      disponivel: !motivoIndisponivel,
+      motivoIndisponivel
+    };
+  }
+
+  /**
+   * Decide se a página ainda corresponde a um anúncio ativo.
+   * Retorna null quando está tudo certo, ou uma string com o motivo.
+   */
+  detectarIndisponibilidade($, status) {
+    if (status >= 400) return `página respondeu HTTP ${status}`;
+
+    const textoPagina = $('body').text();
+    const avisoDeRemocao = textoPagina.match(
+      /no longer available|no longer online|advert has expired|has been removed|this advert is not available|ad has expired|anúncio não está mais disponível/i
+    );
+    if (avisoDeRemocao) return `página informa que o anúncio saiu do ar ("${avisoDeRemocao[0]}")`;
+
+    // Sem título E sem contador de visitantes: não é a página de um anúncio
+    // (normalmente é redirecionamento para busca/home).
+    const temTitulo = !!this.extractTitulo($);
+    const temContador = this.extractVisitors($) !== null;
+    if (!temTitulo && !temContador) {
+      return 'página sem título e sem contador de visitantes (provavelmente fora do ar)';
+    }
+
+    return null;
+  }
+
+  // Função principal de parsing — captura TUDO (usado no cadastro do anúncio
+  // e na recaptura completa, que é uma ação explícita do usuário).
   async parse(url) {
     try {
-      // Fetch da página
-      const { data } = await axios.get(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        },
-        timeout: 15000
-      });
+      const { $, disponivel, motivoIndisponivel } = await this.carregar(url);
 
-      const $ = cheerio.load(data);
-      
+      if (!disponivel) {
+        const erro = new Error(`Anúncio indisponível: ${motivoIndisponivel}`);
+        erro.indisponivel = true;
+        throw erro;
+      }
+
       // Extração de dados
       const result = {
         site: this.site,
@@ -45,6 +100,7 @@ class VivastreetParser {
         etnia: this.extractEtnia($),
         idiomas: this.extractIdiomas($),
         publico_alvo: this.extractPublicoAlvo($),
+        telefone: this.extractTelefone($),
         data_publicacao: this.extractDataPublicacao($),
         membro_desde: this.extractMembroDe($),
         visitors: this.extractVisitors($),
@@ -55,8 +111,31 @@ class VivastreetParser {
 
       return result;
     } catch (error) {
+      if (error.indisponivel) throw error;
       throw new Error(`Erro ao parsear Vivastreet: ${error.message}`);
     }
+  }
+
+  /**
+   * Parse "leve": lê apenas o que muda com o tempo — contador de visitantes e
+   * telefone. É o que a atualização do dia a dia usa, justamente para NÃO
+   * tocar em título, descrição, fotos, preços e serviços já coletados.
+   */
+  async parseLeve(url) {
+    const { $, status, disponivel, motivoIndisponivel } = await this.carregar(url);
+
+    if (!disponivel) {
+      return { disponivel: false, motivoIndisponivel, status, visitors: null, telefone: null };
+    }
+
+    return {
+      disponivel: true,
+      motivoIndisponivel: null,
+      status,
+      titulo: this.extractTitulo($),
+      visitors: this.extractVisitors($),
+      telefone: this.extractTelefone($)
+    };
   }
 
   // ============ EXTRACTORS ============
@@ -159,20 +238,48 @@ class VivastreetParser {
   }
 
   extractVisitors($) {
-    // ".views_counter" ou similar
-    let visitors = 0;
-    
-    // Tenta múltiplos seletores
-    const text = $('.views_counter').text() || 
-                 $('[data-automation="divViewCount"]').text() ||
-                 $('span:contains("views")').text();
-    
-    if (text) {
-      const match = text.match(/(\d+)/);
-      visitors = match ? parseInt(match[1]) : 0;
+    // Retorna null (e não 0!) quando o contador não é encontrado. A diferença
+    // é crítica: 0 seria gravado como "o anúncio zerou as visitas" e destruiria
+    // o cálculo de crescimento; null significa "não deu para ler" e o sistema
+    // descarta a captura em vez de registrar um número falso.
+    const text =
+      $('.views_counter').text() ||
+      $('[data-automation="divViewCount"]').text() ||
+      $('span:contains("views")').text();
+
+    if (!text) return null;
+
+    // Remove separador de milhar antes de ler o número ("1,234 views" -> 1234)
+    const match = text.replace(/[.,](?=\d{3}\b)/g, '').match(/(\d+)/);
+    return match ? parseInt(match[1], 10) : null;
+  }
+
+  extractTelefone($) {
+    // O número fica no atributo data-phone-number do bloco de contato:
+    // <span class="phone_link" id="phone-button-dt" data-phone-number="+44...">
+    const seletores = [
+      '#phone-button-dt[data-phone-number]',
+      '.phone_link[data-phone-number]',
+      '[data-automation*="ContactPhoneButton"][data-phone-number]',
+      '[data-phone-number]'
+    ];
+
+    for (const seletor of seletores) {
+      const bruto = $(seletor).first().attr('data-phone-number');
+      const normalizado = this.normalizarTelefone(bruto);
+      if (normalizado) return normalizado;
     }
-    
-    return visitors;
+
+    return null;
+  }
+
+  normalizarTelefone(bruto) {
+    if (!bruto) return null;
+    // Mantém apenas "+" e dígitos; descarta placeholders vazios do template.
+    const limpo = String(bruto).trim().replace(/[^\d+]/g, '');
+    const digitos = limpo.replace(/\D/g, '');
+    if (digitos.length < 7) return null;
+    return limpo.slice(0, 50);
   }
 
   extractFotos($) {
